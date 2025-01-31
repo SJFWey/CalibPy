@@ -1,0 +1,42 @@
+cams:
+  # Adjust your path to the images you want to load, or leave "id" empty to return zeros.
+  camA: {id: /home/betker/catkin_ws/Code/splib/splib/images/debugging/,
+        class: pyCameras.cameraDummy.Camera,
+        settings:
+          {exposure: 8500,
+          triggerMode: in,
+          resolution: [720, 1280]
+          }
+        }
+projectors:
+  proA: {constructor_args: ,
+        class: pyProjectors.projectorDummy.Projector,
+        settings:
+          {trigger: Out,
+            color: w,
+            exposure: 8500,
+            interval: 300000,
+            resolution: [768, 768],
+            #brightness: 0.25
+            }
+        }
+config:
+  calibrationFile: 'calibpy/configs/calibrationPolyfit050.json'
+  measurement:
+    class: splib.measurementClasses.minImagesPhaseshift.MinImagesPhaseshift
+    settings:
+      direction: xy
+      sequence: [[1, [0, 90]], [5, [0, 90]], [25, [0, 90, 180, 270]]]
+      useLaplacian: False
+      erodePhasemap: 0
+      phasemapFilter: [{"median": 15}, {"gauss": 15}]
+
+
+
+# Supported flags:
+# CALIB_FIX_INTRINSIC
+# CALIB_FIX_PRINCIPAL_POINT
+# CALIB_SAME_FOCAL_LENGTH
+# CALIB_ZERO_TANGENT_DIST
+# CALIB_FIX_K1
+# CALIB_FIX_K2

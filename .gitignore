@@ -1,0 +1,9 @@
+__pycache__
+.venv
+build
+.vscode
+*egg-info
+
+
+calibpy/data/**
+vendor/**
