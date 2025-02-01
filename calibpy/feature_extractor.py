@@ -4,16 +4,13 @@ import numpy as np
 from sklearn.neighbors import KDTree
 import cv2
 
-from calibpy.utils.extractor_utils import (
+from utils.extractor_utils import (
     FeatureAligner,
     FeatureDetector,
     ImageProcessor,
     ImageProcessParams,
 )
-from calibpy.utils.helpers import adaptive_feature_extractor
-
-# Constants
-FEATURE_SPACING_MM = 1.0
+from utils.helpers import adaptive_feature_extractor
 
 
 def find_nearest_feature(point: np.ndarray, features: np.ndarray) -> np.ndarray:
@@ -120,6 +117,7 @@ def track_ref_point(
 
 def extract_features(
     image: np.ndarray,
+    folder_ind: int,
     is_ref_image: bool = False,
     manual_select: bool = False,
     prev_refpoint: Optional[np.ndarray] = None,
@@ -130,6 +128,7 @@ def extract_features(
 
     Args:
         image: Input image as numpy array (uint8)
+        folder_ind: Image folder index
         is_ref_image: If image is the first image, where reference point should be selected
         manual_slect: If manually select reference point
         prev_refpoint: Previous reference point for tracking
@@ -138,7 +137,7 @@ def extract_features(
         img_points: Array of 2D image points (Nx2)
         obj_points: Array of corresponding 3D object points (Nx3)
         refpoint_estimate: Reference point coordinates if is_ref_image=True
-        centroids: Array of detected feature centroids
+        features: Array of detected feature centroids
     """
 
     # Initialize variables
@@ -212,7 +211,7 @@ def extract_features(
     # Analyze grid points
     aligner = FeatureAligner()
     img_points, obj_points, _ = aligner._align_points_to_grid(
-        features, refpoint_estimate
+        features, refpoint_estimate, folder_ind
     )
 
     # Prepare output points

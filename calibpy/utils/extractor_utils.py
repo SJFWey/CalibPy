@@ -322,7 +322,7 @@ class FeatureDetector:
 
         features = np.array([feature["center"] for feature in features])
         features = np.array(features, dtype=np.float32).reshape(-1, 2)
-        
+
         return features
 
     def _refine_feature_points(
@@ -388,13 +388,19 @@ class FeatureAligner:
         self._params = params or FeatureAlignParams()
 
     def _align_points_to_grid(
-        self, centroids: np.ndarray, ref_point: np.ndarray
+        self,
+        centroids: np.ndarray,
+        ref_point: np.ndarray,
+        folder_ind: int,
+        step: float = 0.25,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Align detected feature points to regular grid and get their correspondly object points.
 
         Args:
             centroids: Centroid coordinates of detected features
             ref_point: Reference point (origin) for alignment
+            folder_ind: Folder index to set z-coordinate
+            step: Step size for z-coordinate
 
         Returns:
             valid_features: Array of shape (N,2) containing centroid coordinates of valid features
@@ -408,10 +414,14 @@ class FeatureAligner:
 
         # Set the origin point directly using ref_point
         _, origin_idx = self.get_dists(centroids, ref_point, k=1)
-        obj_points[origin_idx] = [0, 0, 0]  # Set z=0 for origin
+        obj_points[origin_idx] = [
+            0,
+            0,
+            folder_ind * step,
+        ]  # Set z=folder_ind * step for origin
 
         iterations = 0
-        
+
         while (
             np.isnan(obj_points[:, :2].sum())
             and iterations < self._params.max_iterations
@@ -444,7 +454,11 @@ class FeatureAligner:
                                         * self._params.grid_spacing_mm
                                         + obj_points[i, :2]
                                     )
-                                    obj_points[neighbor] = [new_xy[0], new_xy[1], 0]
+                                    obj_points[neighbor] = [
+                                        new_xy[0],
+                                        new_xy[1],
+                                        folder_ind * step,
+                                    ]
                                     new_assignments = True
             if not new_assignments:
                 break
@@ -479,7 +493,7 @@ class FeatureAligner:
                         assigned_coords[0, :2]
                         + relative_pos * self._params.grid_spacing_mm
                     )
-                    obj_points[idx] = [new_xy[0], new_xy[1], 0]
+                    obj_points[idx] = [new_xy[0], new_xy[1], folder_ind * step]
 
         # Filter out points without assigned coordinates
         valid_mask = ~np.isnan(obj_points).any(axis=1)
