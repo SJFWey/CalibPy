@@ -635,7 +635,7 @@ class FeatureExtractor:
             obj_points: Array of corresponding 3D object points (Nx3)
             features: Array of detected feature centroids
         """
-        features = adaptive_feature_extractor(image, min_area=65)
+        features = adaptive_feature_extractor(image, min_area=40, circularity_threshold=0.75)
 
         return features
 
