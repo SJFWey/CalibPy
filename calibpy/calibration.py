@@ -4,16 +4,13 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Union
 
-import matplotlib.pyplot as plt
 import numpy as np
-import cv2
 from splib.calibration import stereoCalibration
 from splib.utils import configLoader
 from splib.utils.resourceManager import ResourceManager
-
-from feature_extractor import extract_features
-from utils.extractor_utils import load_image
-from utils.helpers import export_features, getObjectPointsNNSingle, polyfit
+from utils.feature_extractor_utils import FeatureExtractor, ImageProcessor
+from utils.feature_tracktor_utils import FeatureTracker
+from utils.helpers import polyfit, visualize_feature_tracking
 
 
 def run_calibration(image_folders: Union[str, Path]):
@@ -33,23 +30,25 @@ def run_calibration(image_folders: Union[str, Path]):
     ref_images = []
     calib_images = []
 
-    cam_features = Path("calibpy\\data\\cam_feature_data_z=0.pkl")
+    cam_features = Path("calibpy\\data\\cam_feature_data_test.pkl")
     if cam_features.exists():
         with open(cam_features, "rb") as infile:
             cam_feature_data = pickle.load(infile)
     else:
         cam_feature_data = defaultdict(dict)
-        ref_points = []  # Store reference points of each image for tracking
+        feature_tracker = FeatureTracker()
+        prev_refpoint = None
+        prev_features = None
+        ref_points = []
 
         folders = sorted(
             image_folders.iterdir(),
             key=lambda x: int(x.stem) if x.stem.isdigit() else -1,
         )
 
-        # For test!!!
-        # folders = folders[:10]
+        # For test!!
+        folders = folders[:10]
 
-        prev_features = None
         for folder in folders:
             img_files = sorted(
                 folder.iterdir(),
@@ -60,10 +59,10 @@ def run_calibration(image_folders: Union[str, Path]):
 
             for img in img_files:
                 if img.name == "img0.npy":
-                    ref_img = load_image(img)
+                    ref_img = ImageProcessor.load_image(img)
                     ref_images.append(ref_img)
                 elif img.suffix == ".npy":
-                    calib_img = load_image(img)
+                    calib_img = ImageProcessor.load_image(img)
                     calib_images.append(calib_img)
 
             if ref_images and calib_images:
@@ -73,100 +72,45 @@ def run_calibration(image_folders: Union[str, Path]):
                 print(f"Getting projector map for {folder.stem}...")
                 map = CalShift.getProjectorMap(calib_images)
 
-                # img_points, obj_points = getObjectPointsNNSingle(
-                #     ref_img, folder_ind=int(folder.stem), step=0.0
-                # )
                 is_ref_image = folder.stem == "0"
-                manual_select = is_ref_image
 
-                img_points, obj_points, ref_point, _ = extract_features(
-                    ref_img,
-                    folder_ind=int(folder.stem),
-                    is_ref_image=is_ref_image,
-                    manual_select=manual_select,
-                    prev_refpoint=ref_points[-1] if ref_points else None,
-                    prev_features=prev_features,
+                # Instantiate FeatureExtractor with the loaded reference image
+                feature_extractor = FeatureExtractor(ref_img)
+                img_points, obj_points, ref_point, features = (
+                    feature_tracker.track_features(
+                        image=ref_img,
+                        img_serial_num=int(folder.stem),
+                        feature_extractor=feature_extractor,
+                        manual_select=is_ref_image,  # only manually select on first
+                        prev_refpoint=prev_refpoint,
+                        prev_features=prev_features,
+                        is_ref_image=is_ref_image,
+                    )
                 )
 
                 fitted_map, feature_mask = polyfit(
                     map, img_points, radius=50, dense_thresh=0.8
                 )
 
-                # plt.subplot(131)
-                # plt.imshow(fitted_map[:, :, 0] + fitted_map[:, :, 1])
-                # plt.title("Phasemap Synth")
-
-                # plt.subplot(132)
-                # plt.imshow(fitted_map[:, :, 0])
-                # plt.title('Phasemap X')
-
-                # plt.subplot(133)
-                # plt.imshow(fitted_map[:, :, 1])
-                # plt.title('Phasemap Y')
-
-                # plt.show()
-                # plt.close()
-
                 filtered_img_points = img_points[feature_mask]
                 filtered_obj_points = obj_points[feature_mask]
 
-                # plt.figure(figsize=(12, 8))
-                # plt.imshow(ref_img, cmap="gray", alpha=1.0)
+                prev_ref_image = ref_images[-2] if len(ref_images) > 1 else None
+                prev_ref = ref_points[-1] if len(ref_points) > 0 else None
 
-                # if len(ref_images) > 1 and len(ref_points) > 0:
-                #     plt.imshow(ref_images[-2], cmap="gray", alpha=0.2)
-                #     plt.plot(
-                #         ref_points[-1][0],
-                #         ref_points[-1][1],
-                #         "o",
-                #         color="red",
-                #         markersize=12,
-                #         markerfacecolor="none",
-                #         label="last ref point",
-                #         linewidth=3.0,
-                #     )
+                visualize_feature_tracking(
+                    ref_img=ref_img,
+                    img_points=img_points,
+                    ref_point=ref_point,
+                    prev_ref_point=prev_ref,
+                    prev_ref_image=prev_ref_image,
+                    folder_stem=folder.stem,
+                )
 
-                # plt.plot(
-                #     ref_point[0],
-                #     ref_point[1],
-                #     "o",
-                #     color="deepskyblue",
-                #     markersize=12,
-                #     markerfacecolor="none",
-                #     label="current ref point",
-                #     linewidth=5.0,
-                # )
-
-                # plt.plot(
-                #     img_points[:, 0],
-                #     img_points[:, 1],
-                #     "go",
-                #     markersize=14,
-                #     markerfacecolor="none",
-                #     label="features",
-                #     linewidth=3.0,
-                # )
-
-                # if len(ref_points) > 0:
-                #     prev_ref = ref_points[-1]
-                #     plt.arrow(
-                #         prev_ref[0],
-                #         prev_ref[1],
-                #         ref_point[0] - prev_ref[0],
-                #         ref_point[1] - prev_ref[1],
-                #         color="red",
-                #         width=0.5,
-                #         head_width=3,
-                #         label="tracking trajectory from last frame",
-                #     )
-
-                # plt.title(f"Features Tracking - Folder_{folder.stem}")
-                # plt.legend()
-                # plt.axis("image")
-                # plt.show()
-
+                # Update tracking state
+                prev_refpoint = ref_point
+                prev_features = features
                 ref_points.append(ref_point)
-                prev_features = img_points
 
                 cam_feature_data[folder.stem] = {
                     "projectorMap": fitted_map,
@@ -191,15 +135,13 @@ def run_calibration(image_folders: Union[str, Path]):
     )
     pro_dist_guess = np.zeros((5, 1))
 
-    proj_feature_data, mask_planes, _ = (
-        stereoCalibration.get_projector_features(
-            feature_data=selected_cam_feature_data,
-            projector_resolution=(768, 768),
-            pro_K_guess=pro_K_guess,
-            pro_dist_guess=pro_dist_guess,
-            removal_type="overall",
-            removal_algorithm="3sigma",
-        )
+    proj_feature_data, mask_planes, _ = stereoCalibration.get_projector_features(
+        feature_data=selected_cam_feature_data,
+        projector_resolution=(768, 768),
+        pro_K_guess=pro_K_guess,
+        pro_dist_guess=pro_dist_guess,
+        removal_type="overall",
+        removal_algorithm="3sigma",
     )
 
     for i in range(len(selected_cam_feature_data)):

@@ -14,114 +14,6 @@ def get_dists(points, origin, k=1):
     return dists[0:k], inds[0:k]
 
 
-# def polyfit(
-#     projector_map, features, radius=100, dense_thresh=0.5, var_thresh=1.2
-# ):
-#     """
-#     Two dimensional polynomial fitting by least squares.
-#     Fits the functional form f(x,y) = z.
-
-#     Notes
-#     -----
-#     Resultant fit can be plotted with:
-#     np.polynomial.polynomial.polygrid2d(x, y, soln.reshape((kx+1, ky+1)))
-
-#     Parameters
-#     ----------
-#     x, y: array-like, 1d
-#         x and y coordinates.
-#     z: np.ndarray, 2d
-#         Surface to fit.
-#     kx, ky: int, default is 3
-#         Polynomial order in x and y, respectively.
-#     order: int or None, default is None
-#         If None, all coefficients up to maxiumum kx, ky, ie. up to and including x^kx*y^ky, are considered.
-#         If int, coefficients up to a maximum of kx+ky <= order are considered.
-
-#     Returns
-#     -------
-#     Return paramters from np.linalg.lstsq.
-
-#     soln: np.ndarray
-#         Array of polynomial coefficients.
-#     residuals: np.ndarray
-#     rank: int
-#     s: np.ndarray
-
-#     """
-#     kx = 2
-#     ky = 2
-#     order = 2
-
-#     x_grid = np.arange(np.size(projector_map[:, :, 0], 0))
-#     y_grid = np.arange(np.size(projector_map[:, :, 0], 1))
-
-#     xx, yy = np.meshgrid(x_grid, y_grid)
-
-#     feature_mask = np.ones(np.size(features, 0), dtype=bool)
-
-#     for dir in range(2):
-#         for idx, feature in enumerate(features):
-#             y_c, x_c = feature
-#             xr = xx - x_c
-#             yr = yy - y_c
-
-#             radii = np.sqrt(np.power(xr, 2) + np.power(yr, 2))
-
-#             inds_r = np.where(radii <= radius)
-#             x0 = inds_r[1]
-#             y0 = inds_r[0]
-#             # z = phasemap[radii <= radius]
-#             z = projector_map[x0, y0, dir]
-
-#             local_mean = uniform_filter(z, size=5, mode="constant", cval=0.0)
-#             local_mean_sq = uniform_filter(z**2, size=5, mode="constant", cval=0.0)
-#             local_var = local_mean_sq - local_mean**2
-#             local_var = np.maximum(local_var, 0)
-#             local_std = np.sqrt(local_var)
-
-#             mask_var = local_std < var_thresh * np.mean(local_std)
-#             x_fit, y_fit, z_fit = x0[mask_var], y0[mask_var], z[mask_var]
-
-#             if np.sum(mask_var) / mask_var.size < dense_thresh:
-#                 feature_mask[idx] = False
-#                 continue
-
-#             a = np.zeros((x_fit.size, (kx + 1) * (ky + 1)))
-#             index = 0
-#             for i in range(kx + 1):
-#                 for j in range(ky + 1):
-#                     if i + j > order:
-#                         continue
-#                     a[:, index] = (x_fit**i) * (y_fit**j)
-#                     index += 1
-
-#             c, _, _, _ = lstsq(a, z_fit)
-
-#             inds_z = z > 0.0
-#             x = x0[inds_z]
-#             y = y0[inds_z]
-#             z = z[inds_z]
-
-#             Z = np.zeros_like(radii, dtype=float)
-#             index = 0
-#             for i in range(kx + 1):
-#                 for j in range(ky + 1):
-#                     if i + j > order:
-#                         continue
-#                     Z += c[index] * (xx**i) * (yy**j)
-#                     index += 1
-#             Z = Z[inds_r]
-
-#             projector_map[x0, y0, dir] = Z
-
-#         mask_x = projector_map[:, :, 0] > 1.0
-#         mask_y = projector_map[:, :, 1] > 1.0
-#         projector_map[:, :, 2] = mask_x & mask_y
-
-#     return projector_map, feature_mask
-
-
 def polyfit(projector_map, features, radius=100, dense_thresh=0.5):
     """
     Two dimensional polynomial fitting by least squares.
@@ -320,10 +212,25 @@ def getObjectPointsNNSingle(img, grid_dist=0.5, folder_ind=0, step=0.25, vis=Fal
     return imagePoints, objectPoints
 
 
-def adaptive_feature_extractor(img):
-    min_area = 250
-    max_area = 3000
-    cric_thresh = 0.75
+def adaptive_feature_extractor(
+    img, min_area=250, max_area=3000, circularity_threshold=0.75
+):
+    """
+    Extract feature points from a grayscale image.
+
+    The function scales, blurs, applies CLAHE, and uses adaptive thresholding along with morphological
+    operations to enhance features. It then finds contours, computes centroids, and filters them based
+    on area and circularity.
+
+    Parameters:
+        img (numpy.ndarray): Grayscale input image with pixel values in [0, 1] or [0, 255].
+        min_area (int): Minimum contour area (default 250).
+        max_area (int): Maximum contour area (default 3000).
+        circularity_threshold (float): Minimum circularity value (default 0.75).
+
+    Returns:
+        numpy.ndarray: Array of detected feature points, each as [cx, cy].
+    """
 
     if np.max(img) <= 1.0:
         img *= 255
@@ -369,7 +276,7 @@ def adaptive_feature_extractor(img):
         if perimeter > 0:
             circularity = 4 * math.pi * area / (perimeter**2)
 
-        if area > min_area and area < max_area and circularity > cric_thresh:
+        if area > min_area and area < max_area and circularity > circularity_threshold:
             imgPoints.append([cx, cy])
 
     imgPoints = np.asarray(imgPoints)
@@ -387,33 +294,6 @@ def adaptive_feature_extractor(img):
     # plt.close()
 
     return np.asarray(imgPoints)
-
-
-if __name__ == "__main__":
-    from pathlib import Path
-
-    from calibpy.utils.extractor_utils import load_image
-
-    image_folders = Path("calibpy/tests/test_images")
-    folders = sorted(
-        image_folders.iterdir(), key=lambda x: int(x.stem) if x.stem.isdigit() else -1
-    )
-    for folder in folders:
-        img_files = sorted(
-            folder.iterdir(),
-            key=lambda x: int(x.stem.replace("img", ""))
-            if x.stem.startswith("img")
-            else -1,
-        )
-
-        for img in img_files:
-            image = load_image(img)
-            img_points, _ = adaptive_feature_extractor(image)
-
-            plt.imshow(image)
-            plt.scatter(img_points[:, 0], img_points[:, 1], c="red")
-            plt.show()
-            plt.close()
 
 
 def export_features(camera_data, projector_data, planes, save_path):
@@ -467,4 +347,87 @@ def export_features(camera_data, projector_data, planes, save_path):
 
             with open(save_path / f"calib_data_{num}.json", "w", encoding="utf-8") as f:
                 json.dump(json_data, f, indent=4, sort_keys=True)
-    
+
+
+def visualize_feature_tracking(
+    ref_img,
+    img_points,
+    ref_point,
+    prev_ref_point=None,
+    prev_ref_image=None,
+    folder_stem=None,
+):
+    """
+    Visualize feature tracking results.
+
+    Parameters:
+    -----------
+    ref_img : numpy.ndarray
+        Current reference image
+    img_points : numpy.ndarray
+        Detected feature points
+    ref_point : numpy.ndarray
+        Current reference point
+    prev_ref_point : numpy.ndarray, optional
+        Previous reference point for tracking trajectory
+    prev_ref_image : numpy.ndarray, optional
+        Previous reference image for overlay
+    folder_stem : str, optional
+        Folder name for the title
+    """
+    plt.figure(figsize=(12, 8))
+    plt.imshow(ref_img, cmap="gray", alpha=1.0)
+
+    if prev_ref_image is not None and prev_ref_point is not None:
+        plt.imshow(prev_ref_image, cmap="gray", alpha=0.2)
+        plt.plot(
+            prev_ref_point[0],
+            prev_ref_point[1],
+            "o",
+            color="red",
+            markersize=12,
+            markerfacecolor="none",
+            label="last ref point",
+            linewidth=3.0,
+        )
+
+    plt.plot(
+        ref_point[0],
+        ref_point[1],
+        "o",
+        color="deepskyblue",
+        markersize=12,
+        markerfacecolor="none",
+        label="current ref point",
+        linewidth=5.0,
+    )
+
+    plt.plot(
+        img_points[:, 0],
+        img_points[:, 1],
+        "go",
+        markersize=14,
+        markerfacecolor="none",
+        label="features",
+        linewidth=3.0,
+    )
+
+    if prev_ref_point is not None:
+        plt.arrow(
+            prev_ref_point[0],
+            prev_ref_point[1],
+            ref_point[0] - prev_ref_point[0],
+            ref_point[1] - prev_ref_point[1],
+            color="red",
+            width=0.5,
+            head_width=3,
+            label="tracking trajectory from last frame",
+        )
+
+    title = "Features Tracking"
+    if folder_stem:
+        title += f" - Folder_{folder_stem}"
+    plt.title(title)
+    plt.legend()
+    plt.axis("image")
+    plt.show()

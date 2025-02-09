@@ -6,6 +6,7 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
+from utils.helpers import adaptive_feature_extractor
 
 
 @dataclass
@@ -61,36 +62,6 @@ class FeatureAlignParams:
     grid_interp_step: float = 0.5
 
 
-def load_image(image_path: Union[str, Path]) -> np.ndarray[np.uint8]:
-    """Load and preprocess an image from file.
-
-    Args:
-        image_path: Path to image file (.jpg, .png, .npy)
-
-    Returns:
-        Image as uint8 numpy array
-
-    Raises:
-        ValueError: If image loading fails
-        Exception: For other loading/processing errors
-    """
-    try:
-        path = Path(image_path)
-        if path.suffix == ".npy":
-            image = np.load(str(path)).copy()
-            if np.max(image) <= 1.0:
-                image = (image * 255).astype(np.uint8)
-        else:
-            image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-            if image is None:
-                raise ValueError(f"Failed to load image: {path}")
-
-        return image.astype(np.uint8)
-    except Exception as e:
-        print(f"Error loading image {image_path}: {str(e)}")
-        raise
-
-
 class ImageProcessor:
     """Image processing utilities for feature detection.
 
@@ -106,6 +77,35 @@ class ImageProcessor:
     ) -> None:
         self._raw_image = image.astype(np.uint8)
         self._params = params or ImageProcessParams()
+
+    @staticmethod
+    def load_image(image_path: Union[str, Path]) -> np.ndarray[np.uint8]:
+        """Load and preprocess an image from file.
+
+        Args:
+            image_path: Path to image file (.jpg, .png, .npy)
+
+        Returns:
+            Image as uint8 numpy array
+
+        Raises:
+            ValueError: If image loading fails
+            Exception: For other loading/processing errors
+        """
+        try:
+            path = Path(image_path)
+            if path.suffix == ".npy":
+                image = np.load(str(path)).copy()
+                if np.max(image) <= 1.0:
+                    image = (image * 255).astype(np.uint8)
+            else:
+                image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+                if image is None:
+                    raise ValueError(f"Failed to load image: {path}")
+
+            return image.astype(np.uint8)
+        except Exception as e:
+            print(f"Error loading image {image_path}: {str(e)}")
 
     def _filter_image(self) -> np.ndarray:
         """Preprocess image for feature detection.
@@ -392,7 +392,7 @@ class FeatureAligner:
         centroids: np.ndarray,
         ref_point: np.ndarray,
         folder_ind: int,
-        step: float = 0.25,
+        step: float = 0,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Align detected feature points to regular grid and get their correspondly object points.
 
@@ -613,3 +613,86 @@ class FeatureAligner:
 
         plt.tight_layout()
         plt.show()
+
+
+class FeatureExtractor:
+    def __init__(self, image: np.ndarray):
+        self._aligner = FeatureAligner()
+        self._image = image
+
+    def _extract_features_2d(
+        self,
+        image: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Extract point features from a single image.
+
+        Args:
+            image: Input image as numpy array (uint8)
+
+        Returns:
+            img_points: Array of 2D image points (Nx2)
+            obj_points: Array of corresponding 3D object points (Nx3)
+            features: Array of detected feature centroids
+        """
+        features = adaptive_feature_extractor(image, min_area=65)
+
+        return features
+
+    def _extract_3d_points(
+        self,
+        img_serial_num: int,
+        ref_point: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Align 2D features to 3D object points.
+
+        Args:
+            img_serial_num: Index of the image in sequence
+            ref_point: Optional reference point to use as grid origin
+
+        Returns:
+            Tuple:
+                - img_points: Array of 2D image points (Nx2)
+                - obj_points: Array of corresponding 3D object points (Nx3)
+                - features: Array of all detected feature centroids
+                - ref_point: Reference point used for alignment
+
+        Note:
+            If no features are found, returns empty arrays for points
+        """
+        # Extract 2D features
+        features = self._extract_features_2d(self._image)
+
+        # Early return if no features found
+        if len(features) == 0:
+            return np.array([]), np.array([]), features
+
+        # Determine reference point if not provided
+        if ref_point is None:
+            h, w = self._image.shape[:2]
+            image_center = np.array([w / 2, h / 2])
+            distances = np.linalg.norm(features - image_center, axis=1)
+            ref_point = features[np.argmin(distances)]
+
+        # Analyze grid points and convert to required format
+        img_points, obj_points, _ = self._aligner._align_points_to_grid(
+            features, ref_point, img_serial_num
+        )
+        img_points = np.reshape(img_points, (-1, 2)).astype(np.float64)
+
+        return img_points, obj_points, features, ref_point
+
+    def get_2d_3d_points(
+        self, image: np.ndarray, img_serial_num: int, ref_point: Optional[np.ndarray]
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Public method to (re)assign current image and extract 2D/3D points.
+
+        Args:
+            image: Current image (uint8)
+            img_serial_num: Folder or image index
+            ref_point: Reference point to treat as origin
+        """
+        self._image = image
+        return self._extract_3d_points(img_serial_num, ref_point)

@@ -8,3 +8,5 @@ build
 *.pkl
 third_party/**
 calibpy/data/results/**
+calibpy/data/new_images/**
+calibpy/data/feature_data/**
