@@ -27,7 +27,7 @@ def load_calib_data(feature_data_path: str | Path) -> dict:
     }
 
     for i, json_file in enumerate(json_files):
-        with open(json_file, "r") as f:
+        with open(json_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         calib_data["obj_points"][i] = np.array(data["obj_points"])
         calib_data["img_points"][i] = np.array(data["img_points"])
@@ -107,6 +107,7 @@ def calibrate_camera(feature_data_path: str | Path, image_size=(1280, 720)) -> d
         "mean_error": calib_results["mean_reproj_error"],
         "std_error": calib_results["std_reproj_error"],
         "extrinsics": calib_results["extrinsics"],
+        "param_correlations": calib_results.get("param_correlations", None),
     }
 
     return results
@@ -141,3 +142,34 @@ if __name__ == "__main__":
         print(
             f"  Translation (mm): {ext['tvec'][0]:.2f}, {ext['tvec'][1]:.2f}, {ext['tvec'][2]:.2f}"
         )
+
+    # Improved printing of correlation matrix using descriptive labels and pandas formatting
+    import pandas as pd
+
+    # Example: define intrinsics and extrinsics labels based on optimized parameters
+    intrinsics = ["fx", "fy", "cx", "cy", "k1", "k2", "p1", "p2", "k3"]
+    num_extrinsics = len(results["extrinsics"])
+    extrinsics = (
+        [f"Img{i} rvec_x" for i in range(num_extrinsics)]
+        + [f"Img{i} rvec_y" for i in range(num_extrinsics)]
+        + [f"Img{i} rvec_z" for i in range(num_extrinsics)]
+        + [f"Img{i} tvec_x" for i in range(num_extrinsics)]
+        + [f"Img{i} tvec_y" for i in range(num_extrinsics)]
+        + [f"Img{i} tvec_z" for i in range(num_extrinsics)]
+    )
+    param_labels = intrinsics + extrinsics
+
+    if results["param_correlations"] is not None:
+        n_params = len(param_labels)
+        if results["param_correlations"].shape == (n_params, n_params):
+            corr_df = pd.DataFrame(
+                results["param_correlations"], index=param_labels, columns=param_labels
+            )
+            print("\nParameter Correlation Matrix:")
+            print(corr_df.iloc[:9, :9].round(2))
+        else:
+            print(
+                "Parameter correlation matrix dimensions do not match parameter labels."
+            )
+    else:
+        print("No parameter correlations available.")

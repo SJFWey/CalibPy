@@ -469,9 +469,14 @@ class Optimizer:
 
     def estimate_uncertainty(self, J, residuals):
         """
-        Estimate calibration parameter uncertainty:
-          - Compute covariance matrix: cov = (J^T J)^-1 * σ², where σ² is the residual variance.
-          - Compute standard deviation for each parameter.
+        Estimate calibration parameter uncertainty and correlations:
+          - Compute covariance matrix: cov = (J^T J)^-1 * σ², where σ² is the residual variance
+          - Extract standard deviations (diagonal elements)
+          - Compute correlation matrix from covariance matrix
+
+        Returns:
+            Tuple of (covariance matrix, standard deviations, correlation matrix)
+            or None if computation fails
         """
         dof = J.shape[0] - J.shape[1]
         if dof <= 0:
@@ -479,27 +484,71 @@ class Optimizer:
                 "Warning: Insufficient degrees of freedom for uncertainty estimation."
             )
             return None
+
         sigma2 = np.sum(residuals**2) / dof
+
         try:
             JTJ_inv = np.linalg.inv(J.T @ J)
+            cov_matrix = JTJ_inv * sigma2
+
+            # Extract standard deviations (sqrt of diagonal elements)
+            param_std = np.sqrt(np.diag(cov_matrix))
+
+            # Compute correlation matrix
+            # corr_ij = cov_ij / (std_i * std_j)
+            std_outer = np.outer(param_std, param_std)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                corr_matrix = np.where(std_outer > 0, cov_matrix / std_outer, 0)
+
+            # Set diagonal to exactly 1.0 to avoid numerical issues
+            np.fill_diagonal(corr_matrix, 1.0)
+
+            return cov_matrix, param_std, corr_matrix
+
         except np.linalg.LinAlgError:
             print("Warning: Inversion of J^T J failed, uncertainty estimation aborted.")
             return None
-        cov_matrix = JTJ_inv * sigma2
-        param_std = np.sqrt(np.diag(cov_matrix))
-        return cov_matrix, param_std
 
-    def remove_outliers(self, threshold: float):
+    def remove_outliers(self, threshold_sigma: float = 3.0):
         """
-        Remove points whose reprojection error exceeds the given threshold.
-        Returns the number of removed points.
+        Remove points whose reprojection error exceeds threshold_sigma * standard_deviation.
+        Uses Median Absolute Deviation (MAD) for robust statistics.
+
+        Args:
+            threshold_sigma: Number of standard deviations for outlier threshold (default: 3.0)
+
+        Returns:
+            The number of removed points
         """
-        if threshold <= 0:
-            raise ValueError("Threshold must be positive")
+        if threshold_sigma <= 0:
+            raise ValueError("threshold_sigma must be positive")
 
         removed_count = 0
         new_object_points = {}
         new_image_points = {}
+
+        # Collect all reprojection errors
+        all_errors = []
+        for i in self.indices:
+            errors = self.calc_single_image_error(i)
+            if len(errors) > 0:
+                errors = errors.reshape(-1, 2)
+                norm_errors = np.linalg.norm(errors, axis=1)
+                all_errors.extend(norm_errors)
+
+        if not all_errors:
+            return 0
+
+        # Calculate robust statistics using median and MAD
+        all_errors = np.array(all_errors)
+        median_error = np.median(all_errors)
+        # MAD is more robust to outliers than standard deviation
+        mad = np.median(np.abs(all_errors - median_error))
+        # Convert MAD to standard deviation estimate (1.4826 factor assuming normal distribution)
+        sigma = 1.4826 * mad
+
+        # Calculate adaptive threshold
+        adaptive_threshold = median_error + threshold_sigma * sigma
 
         for i in self.indices:
             errors = self.calc_single_image_error(i)
@@ -511,7 +560,7 @@ class Optimizer:
 
             errors = errors.reshape(-1, 2)
             norm_errors = np.linalg.norm(errors, axis=1)
-            mask = norm_errors < threshold
+            mask = norm_errors < adaptive_threshold
 
             # Ensure we don't remove all points from an image
             if not np.any(mask):
@@ -527,6 +576,7 @@ class Optimizer:
 
         self.object_points = new_object_points
         self.image_points = new_image_points
+
         return removed_count
 
     def calibrate(self):
@@ -572,11 +622,13 @@ class Optimizer:
         # Recompute global Jacobian using analytical Jacobian for uncertainty estimation
         J_global = self.calc_reproj_jac_analytical(optimized_params)
         residuals = self.calc_reproj_error(optimized_params)
+
+        # Update uncertainty estimation handling
         uncertainty = self.estimate_uncertainty(J_global, residuals)
         if uncertainty is not None:
-            cov_matrix, param_std = uncertainty
+            cov_matrix, param_std, corr_matrix = uncertainty
         else:
-            cov_matrix, param_std = None, None
+            cov_matrix, param_std, corr_matrix = None, None, None
 
         # Compute reprojection error statistics for each image
         reproj_errors = []
@@ -620,6 +672,7 @@ class Optimizer:
             "residual": res.cost,
             "covariance": cov_matrix,
             "param_std": param_std,
+            "param_correlations": corr_matrix,
             "mean_reproj_error": mean_error,
             "std_reproj_error": std_error,
         }
