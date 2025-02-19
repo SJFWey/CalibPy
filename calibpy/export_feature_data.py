@@ -43,7 +43,7 @@ def extract_and_save_features(
         h, w = img.shape[:2]
         center = (w // 2, h // 2)
 
-        def filter_outliers(points, tol=0.5, radius_multiplier=0.9):
+        def filter_outliers(points, tol=0.5, radius_multiplier=0.85):
             """
             Filters outliers based on distance to neighbors and proximity to the edge.
 

@@ -1,92 +1,44 @@
-import math
-from dataclasses import dataclass, field
-
 import cv2
 import numpy as np
 from scipy.optimize import least_squares
+
+from .optimizer_params import (
+    OptimizerParams,
+    CalibrationFlags,
+    OptimizationState,
+    ParamsGuess,
+    Intrinsics,
+    Extrinsics,
+)
 
 np.set_printoptions(
     suppress=True, precision=2, formatter={"float_kind": "{:0.2f}".format}
 )
 
 
-@dataclass
-class ParamsGuess:
+def rodrigues_to_euler(rvec):
     """
-    Initialize camera intrinsic parameters.
+    Convert Rodrigues rotation vector to Euler angles (roll, pitch, yaw) in degrees.
     """
+    R, _ = cv2.Rodrigues(rvec)
 
-    def __init__(
-        self, image_size, fx=None, fy=None, cx=None, cy=None, skew=None, dist_coeffs=None
-    ):
-        self.fx = fx
-        self.fy = fy
-        if cx is None:
-            self.cx = image_size[0] / 2
+    # Extract angles - using math to avoid potential gimbal lock issues
+    pitch = np.arctan2(-R[2, 0], np.sqrt(R[2, 1] ** 2 + R[2, 2] ** 2))
+
+    if np.abs(pitch) > np.pi / 2 - 1e-8:  # Close to ±90°
+        # Special case near pitch = ±90°
+        roll = 0  # Set roll to zero in this case
+        if pitch > 0:
+            yaw = np.arctan2(R[1, 2], R[1, 1])
         else:
-            self.cx = cx
-        if cy is None:
-            self.cy = image_size[1] / 2
-        else:
-            self.cy = cy
-        if skew is None:
-            self.skew = 0.0
-        else:
-            self.skew = skew
-        if dist_coeffs is None:
-            self.dist_coeffs = np.zeros((5,), dtype=float)
-        else:
-            self.dist_coeffs = dist_coeffs
+            yaw = -np.arctan2(R[1, 2], R[1, 1])
+    else:
+        # Normal case
+        roll = np.arctan2(R[2, 1], R[2, 2])
+        yaw = np.arctan2(R[1, 0], R[0, 0])
 
-    def is_none(self):
-        if self.fx is None or self.fy is None:
-            return True
-
-
-@dataclass
-class Intrinsics:
-    """
-    Camera intrinsic parameter data structure.
-    """
-
-    fx: float
-    fy: float
-    cx: float
-    cy: float
-    skew: float
-    dist_coeffs: np.ndarray
-
-
-@dataclass
-class Extrinsics:
-    """
-    Camera extrinsic parameter data structure.
-    """
-
-    rvec: np.ndarray
-    tvec: np.ndarray
-
-
-class CalibrationFlags:
-    def __init__(self):
-        self.estimate_focal = np.array([True, True])
-        self.estimate_principal = True
-        self.estimate_skew = True
-        self.estimate_distort = np.array([True, True, True, True, True])
-        self.estimate_extrinsics = True
-        self.fix_aspect_ratio = False
-
-        if np.array_equal(self.estimate_focal, np.array([False, False])):
-            self.estimate_principal = False
-
-    def to_dict(self):
-        return {
-            "focal": self.estimate_focal,
-            "principal": self.estimate_principal,
-            "skew": self.estimate_skew,
-            "distortion": self.estimate_distort,
-            "extrinsics": self.estimate_extrinsics,
-        }
+    # Convert to degrees
+    return np.array([np.rad2deg(roll), np.rad2deg(pitch), np.rad2deg(yaw)])
 
 
 class Optimizer:
@@ -102,9 +54,8 @@ class Optimizer:
         self,
         calib_data: dict,
         params_guess: ParamsGuess,
-        max_iter: int = 100,
-        step: float = 0.1,
-        verbose: int = 1,
+        optimizer_params: OptimizerParams = None,
+        flags: CalibrationFlags = None,
     ):
         self.fx = params_guess.fx
         self.fy = params_guess.fy
@@ -117,8 +68,17 @@ class Optimizer:
         self.image_points = calib_data.get("img_points", {})
         self.indices = sorted(self.image_points.keys())
 
-        self.flags = CalibrationFlags()
+        # Use provided flags or create default ones
+        self.flags = flags if flags is not None else CalibrationFlags()
         self.optim_flags = self.flags.to_dict()
+
+        # Use provided optimizer params or create default ones
+        self.optim_params = (
+            optimizer_params if optimizer_params is not None else OptimizerParams()
+        )
+
+        # Initialize optimization state
+        self.optim_state = OptimizationState()
 
         self.init_pp = np.array([self.cx, self.cy])
         if self.flags.fix_aspect_ratio:
@@ -185,19 +145,6 @@ class Optimizer:
 
         self.params_history = self.pack_parameters()
 
-        self.max_iter = max_iter
-        self.alpha_smooth = step
-        self.verbose = verbose
-
-        # Set optimization method and loss parameters for robustness
-        self.optimization_method = (
-            "trf"  # Trust-region reflective algorithm supporting robust loss
-        )
-        self.loss = "soft_l1"  # Robust loss to reduce influence of outliers
-        self.ftol = 1e-9
-        self.xtol = 1e-9
-        self.gtol = 1e-9
-
     def pack_parameters(self):
         """
         Pack structured parameters into a 1D vector.
@@ -257,6 +204,8 @@ class Optimizer:
         """
         Compute the reprojection error for a single image.
         """
+        if self.object_points[i].shape[0] == 0:
+            return np.array([])
         K = np.array(
             [
                 [self.intrinsics.fx, self.intrinsics.skew, self.intrinsics.cx],
@@ -272,6 +221,8 @@ class Optimizer:
             K,
             self.intrinsics.dist_coeffs,
         )
+        if projected_points is None:
+            return np.array([])
         error = projected_points.reshape(-1, 2) - self.image_points[i]
         return error.ravel()
 
@@ -318,6 +269,9 @@ class Optimizer:
 
         # Transform the 3D point into the camera coordinate system
         X = X.reshape(3, 1)
+        if X.shape != (3, 1):
+            raise ValueError(f"Invalid point shape: {X.shape}, expected (3, 1)")
+
         tvec = extrinsics.tvec.reshape((3, 1))
         X_cam = R @ X + tvec
         Xc, Yc, Zc = X_cam.flatten()
@@ -498,11 +452,19 @@ class Optimizer:
                 row_counter += 2
 
         # Check Jacobian condition number, warn if too high indicating numerical instability
-        cond_number = np.linalg.cond(J_global)
-        if cond_number > 1e12:
-            print(
-                f"Warning: Jacobian condition number is high ({cond_number:.2e}), calibration may be unstable."
-            )
+        if np.any(np.isnan(J_global)) or np.any(np.isinf(J_global)):
+            print("Warning: NaN or Inf values in Jacobian matrix")
+            return J_global
+
+        try:
+            cond_number = np.linalg.cond(J_global)
+            if cond_number > 1e12:
+                print(
+                    f"Warning: Jacobian condition number is high ({cond_number:.2e}), calibration may be unstable."
+                )
+        except np.linalg.LinAlgError:
+            print("Warning: Could not compute condition number")
+
         return J_global
 
     def estimate_uncertainty(self, J, residuals):
@@ -527,26 +489,85 @@ class Optimizer:
         param_std = np.sqrt(np.diag(cov_matrix))
         return cov_matrix, param_std
 
+    def remove_outliers(self, threshold: float):
+        """
+        Remove points whose reprojection error exceeds the given threshold.
+        Returns the number of removed points.
+        """
+        if threshold <= 0:
+            raise ValueError("Threshold must be positive")
+
+        removed_count = 0
+        new_object_points = {}
+        new_image_points = {}
+
+        for i in self.indices:
+            errors = self.calc_single_image_error(i)
+            if len(errors) == 0:
+                # Skip empty images
+                new_object_points[i] = self.object_points[i]
+                new_image_points[i] = self.image_points[i]
+                continue
+
+            errors = errors.reshape(-1, 2)
+            norm_errors = np.linalg.norm(errors, axis=1)
+            mask = norm_errors < threshold
+
+            # Ensure we don't remove all points from an image
+            if not np.any(mask):
+                print(
+                    f"Warning: All points would be removed from image {i}, keeping the best 3"
+                )
+                best_indices = np.argsort(norm_errors)[:3]
+                mask[best_indices] = True
+
+            new_object_points[i] = self.object_points[i][mask]
+            new_image_points[i] = self.image_points[i][mask]
+            removed_count += np.count_nonzero(~mask)
+
+        self.object_points = new_object_points
+        self.image_points = new_image_points
+        return removed_count
+
     def calibrate(self):
         """
         Perform camera calibration by minimizing the reprojection error.
-        Returns calibration results including intrinsics, extrinsics, residual, and uncertainty estimation.
         """
-        initial_params = self.pack_parameters().copy()
-        res = least_squares(
-            self.calc_reproj_error,
-            initial_params,
-            jac=self.calc_reproj_jac_analytical,
-            method=self.optimization_method,
-            loss=self.loss,
-            ftol=self.ftol,
-            xtol=self.xtol,
-            gtol=self.gtol,
-            max_nfev=self.max_iter,
-            verbose=self.verbose,
-        )
-        optimized_params = res.x
-        self.unpack_parameters(optimized_params)
+        for iter in range(self.optim_params.max_outlier_iter):
+            # Count total points before optimization
+            total_points = sum(len(points) for points in self.image_points.values())
+
+            res = least_squares(
+                fun=self.calc_reproj_error,
+                x0=self.pack_parameters(),
+                jac=self.calc_reproj_jac_analytical,
+                loss=self.optim_params.loss,
+                method=self.optim_params.optimization_method,
+                f_scale=self.optim_params.loss_scale,
+                ftol=self.optim_params.ftol,
+                gtol=self.optim_params.gtol,
+                xtol=self.optim_params.xtol,
+                max_nfev=self.optim_params.max_nfev,
+                verbose=self.optim_params.verbose,
+            )
+
+            # Update optimization state
+            self.optim_state.update(res.x, res.cost)
+            self.unpack_parameters(res.x)
+
+            removed = self.remove_outliers(self.optim_params.outlier_threshold)
+            if removed == 0:
+                break  # no more outliers removed, stop
+            else:
+                remaining_points = sum(
+                    len(points) for points in self.image_points.values()
+                )
+                print(
+                    f"Iteration {iter + 1}: Removed {removed} points from {total_points} points ({remaining_points} points remaining)"
+                )
+
+        # Continue with final uncertainty estimation and summary:
+        optimized_params = self.pack_parameters()
 
         # Recompute global Jacobian using analytical Jacobian for uncertainty estimation
         J_global = self.calc_reproj_jac_analytical(optimized_params)
@@ -566,15 +587,36 @@ class Optimizer:
         mean_error = np.mean(reproj_errors)
         std_error = np.std(reproj_errors)
 
+        # Print calibration results
+        # Convert rotation vectors to euler angles for each image
+        extrinsics_with_angles = []
+        for i in self.indices:
+            euler_angles = rodrigues_to_euler(self.extrinsics[i].rvec)
+            extrinsics_with_angles.append(
+                {
+                    "rvec": self.extrinsics[i].rvec,
+                    "tvec": self.extrinsics[i].tvec,
+                    "euler_angles": euler_angles,  # [roll, pitch, yaw] in degrees
+                }
+            )
+ 
+        extrinsics_with_angles = []
+        for i in self.indices:
+            euler_angles = rodrigues_to_euler(self.extrinsics[i].rvec)
+            extrinsics_with_angles.append(
+                {
+                    "rvec": self.extrinsics[i].rvec,
+                    "tvec": self.extrinsics[i].tvec,
+                    "euler_angles": euler_angles,  # [roll, pitch, yaw] in degrees
+                }
+            )
+
         return {
             "fc": [self.intrinsics.fx, self.intrinsics.fy],
             "pp": [self.intrinsics.cx, self.intrinsics.cy],
             "skew": self.intrinsics.skew,
             "dist_coeffs": self.intrinsics.dist_coeffs,
-            "extrinsics": [
-                {"rvec": self.extrinsics[i].rvec, "tvec": self.extrinsics[i].tvec}
-                for i in self.indices
-            ],
+            "extrinsics": extrinsics_with_angles,
             "residual": res.cost,
             "covariance": cov_matrix,
             "param_std": param_std,
@@ -627,8 +669,11 @@ def estimate_intrinsics(object_points, image_points, cx, cy, fix_aspect_ratio):
     inv_fx2 = np.abs(X[0])
     inv_fy2 = np.abs(X[1])
 
-    fx = 1.0 / np.sqrt(inv_fx2) if inv_fx2 > 1e-8 else 0.0
-    fy = 1.0 / np.sqrt(inv_fy2) if inv_fy2 > 1e-8 else 0.0
+    fx = 1.0 / np.sqrt(inv_fx2) if inv_fx2 > 1e-8 else None
+    fy = 1.0 / np.sqrt(inv_fy2) if inv_fy2 > 1e-8 else None
+
+    if fx is None or fy is None:
+        return None, None
 
     if fix_aspect_ratio:
         f_scalar = (fx + fy) / 2.0
@@ -641,7 +686,22 @@ def estimate_extrinsics(object_points, image_points, intrinsics):
     """
     Estimate extrinsic parameters for each image.
     For planar data, uses homography with RANSAC; for non-planar data, uses cv2.solvePnP with LM refinement.
+
+    Args:
+        object_points: Dictionary of 3D object points per image
+        image_points: Dictionary of 2D image points per image
+        intrinsics: Camera intrinsic parameters
+
+    Returns:
+        Dictionary of extrinsic parameters per image
+
+    Raises:
+        ValueError: If input points are empty or invalid
+        RuntimeError: If PnP estimation fails
     """
+    if not object_points or not image_points:
+        raise ValueError("Empty object_points or image_points")
+
     extrinsics_dict = {}
 
     K = np.array(
@@ -673,7 +733,7 @@ def estimate_extrinsics(object_points, image_points, intrinsics):
 
         planar_ratio = S[2] / S[1] if S[1] != 0 else 0
         if planar_ratio < 1e-6 or num_pts < 5:
-            H, _ = cv2.findHomography(img_pts_norm, obj_pts[:, :2], cv2.RANSAC)
+            H, _ = cv2.findHomography(obj_pts[:, :2], img_pts_norm, cv2.RANSAC)
 
             if H is None:
                 continue
@@ -699,15 +759,20 @@ def estimate_extrinsics(object_points, image_points, intrinsics):
             rvec, _ = cv2.Rodrigues(rot_mat)
             tvec = H[:, 2] * lambda_
         else:
-            success, rvec, tvec = cv2.solvePnP(
-                obj_pts,
-                img_pts,
-                K,
-                intrinsics.dist_coeffs,
-                flags=cv2.SOLVEPNP_ITERATIVE,
-            )
-            if not success:
-                raise RuntimeError("PnP estimation failed")
+            # Try different PnP methods if initial one fails
+            methods = [cv2.SOLVEPNP_ITERATIVE, cv2.SOLVEPNP_EPNP, cv2.SOLVEPNP_DLS]
+            for method in methods:
+                try:
+                    success, rvec, tvec = cv2.solvePnP(
+                        obj_pts, img_pts, K, intrinsics.dist_coeffs, flags=method
+                    )
+                    if success:
+                        break
+                except cv2.error:
+                    continue
+            else:
+                print(f"Warning: All PnP methods failed for image {i}")
+                continue
 
         rvec, tvec = cv2.solvePnPRefineLM(
             obj_pts,
