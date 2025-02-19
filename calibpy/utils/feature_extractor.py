@@ -677,9 +677,9 @@ class FeatureExtractor:
 
         # Analyze grid points and convert to required format
         img_points, obj_points, _ = self._aligner._align_points_to_grid(
-            features, ref_point, img_serial_num
+            features, ref_point, img_serial_num, step=0.25
         )
-        img_points = np.reshape(img_points, (-1, 2)).astype(np.float64)
+        img_points = np.reshape(img_points, (-1, 2)).astype(np.float32)
 
         return img_points, obj_points, features, ref_point
 

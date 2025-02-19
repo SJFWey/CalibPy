@@ -1,7 +1,6 @@
 import json
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 
 
 def visualize_extrinsics(calibration_file_path):
@@ -42,16 +41,16 @@ def visualize_extrinsics(calibration_file_path):
         vertices = np.array(
             [
                 [0, 0, 0],  # apex
-                [-scale, -scale, 2*scale],  # base 1
-                [scale, -scale, 2*scale],  # base 2
-                [scale, scale, 2*scale],  # base 3
-                [-scale, scale, 2*scale],  # base 4
+                [-scale, -scale, 2 * scale],  # base 1
+                [scale, -scale, 2 * scale],  # base 2
+                [scale, scale, 2 * scale],  # base 3
+                [-scale, scale, 2 * scale],  # base 4
             ]
         )
 
         # Apply rotation and translation
         transformed_vertices = (R @ vertices.T + T).T
-        
+
         # Store vertices for plotting bounds calculation
         draw_pyramid.all_points.append(transformed_vertices)
 
@@ -104,7 +103,7 @@ def visualize_extrinsics(calibration_file_path):
     all_points = np.vstack(draw_pyramid.all_points)
     max_vals = np.max(all_points, axis=0)
     min_vals = np.min(all_points, axis=0)
-    
+
     # Set axis limits with some padding
     padding = 2.0  # cm
     ax.set_xlim(min_vals[0] - padding, max_vals[0] + padding)

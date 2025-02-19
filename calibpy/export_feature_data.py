@@ -1,10 +1,9 @@
 from pathlib import Path
 from scipy.io import savemat
-import json
 import numpy as np
-import cv2
+import json  # added import
 
-from utils.feature_extractor_utils import ImageProcessor, FeatureExtractor
+from utils.feature_extractor import ImageProcessor, FeatureExtractor
 
 
 def extract_and_save_features(
@@ -101,18 +100,19 @@ def extract_and_save_features(
                 )
 
             fig.canvas.mpl_connect("key_press_event", on_key)
-            # plt.show()
+            plt.show()
             plt.close()
 
         if if_save:
-            # Save individual feature data in mat format
-            savemat(
-                output_path / f"feature_data_{img_files[i].stem}.mat",
-                {
-                    "img_points": img_points,
-                    "obj_points": obj_points,
-                },
-            )
+            # Save individual feature data in json format
+            with open(output_path / f"feature_data_{img_files[i].stem}.json", "w") as f:
+                json.dump(
+                    {
+                        "img_points": img_points.tolist(),
+                        "obj_points": obj_points.tolist(),
+                    },
+                    f,
+                )
 
 
 if __name__ == "__main__":

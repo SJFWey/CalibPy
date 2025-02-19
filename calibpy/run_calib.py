@@ -8,8 +8,8 @@ import numpy as np
 from splib.calibration import stereoCalibration
 from splib.utils import configLoader
 from splib.utils.resourceManager import ResourceManager
-from utils.feature_extractor_utils import FeatureExtractor, ImageProcessor
-from utils.feature_tracktor_utils import FeatureTracker
+from utils.feature_extractor import FeatureExtractor, ImageProcessor
+from utils.feature_tracktor import FeatureTracker
 from utils.helpers import polyfit, visualize_feature_tracking
 
 

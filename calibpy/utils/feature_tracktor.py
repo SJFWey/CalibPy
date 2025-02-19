@@ -5,7 +5,7 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.neighbors import KDTree
-from utils.feature_extractor_utils import FeatureExtractor
+from utils.feature_extractor import FeatureExtractor
 
 
 class FeatureTracker:
