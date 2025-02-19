@@ -38,7 +38,7 @@ class OptimizerParams:
     verbose: int = 1
     outlier_threshold: float = 0.5
     max_outlier_iter: int = 3
-    optimization_method: str = "trf"
+    opt_method: str = "trf"
     loss: str = "soft_l1"
     loss_scale: float = 1.0
     ftol: float = 1e-8

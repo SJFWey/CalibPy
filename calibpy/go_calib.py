@@ -2,10 +2,9 @@ import json
 from pathlib import Path
 
 import numpy as np
-from utils.calibrator_temp import Optimizer
+from utils.calibrator import Optimizer
 from utils.optimizer_params import OptimizerParams, CalibrationFlags, ParamsGuess
-
-from export_feature_data import extract_and_save_features
+from utils.helpers import extract_and_save_features
 
 
 def load_calib_data(feature_data_path: str | Path) -> dict:
@@ -70,16 +69,16 @@ def calibrate_camera(feature_data_path: str | Path, image_size=(1280, 720)) -> d
         verbose=1,
         outlier_threshold=1.5,
         max_outlier_iter=3,
+        opt_method="lm",
+        loss="linear",
     )
 
     # Create calibration flags with correct parameter names
     flags = CalibrationFlags(
         fix_aspect_ratio=False,  # Allow fx and fy to be different
         estimate_principal=True,
-        estimate_skew=True,
-        estimate_distort=np.array(
-            [True, True, True, True, False]
-        ),
+        estimate_skew=False,
+        estimate_distort=np.array([True, True, True, True, True]),
     )
 
     # Create optimizer and run calibration

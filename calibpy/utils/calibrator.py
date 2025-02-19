@@ -542,7 +542,7 @@ class Optimizer:
                 x0=self.pack_parameters(),
                 jac=self.calc_reproj_jac_analytical,
                 loss=self.optim_params.loss,
-                method=self.optim_params.optimization_method,
+                method=self.optim_params.opt_method,
                 f_scale=self.optim_params.loss_scale,
                 ftol=self.optim_params.ftol,
                 gtol=self.optim_params.gtol,
@@ -599,7 +599,7 @@ class Optimizer:
                     "euler_angles": euler_angles,  # [roll, pitch, yaw] in degrees
                 }
             )
- 
+
         extrinsics_with_angles = []
         for i in self.indices:
             euler_angles = rodrigues_to_euler(self.extrinsics[i].rvec)
