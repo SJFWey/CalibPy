@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import numpy as np
-from utils.calibrator_temp import InitParams, Optimizer
+from utils.calibrator_temp import ParamsGuess, Optimizer
 
 from export_feature_data import extract_and_save_features
 
@@ -54,18 +54,18 @@ def calibrate_camera(feature_data_path: str | Path, image_size=(1280, 720)) -> d
         raise ValueError("No feature data found in the specified directory")
 
     # Initialize camera parameters with default values
-    init_params = InitParams(
-        IMG_WIDTH=image_size[0],
-        IMG_HEIGHT=image_size[1],
-        INITIAL_FOV=60,
-        fx=703.0,  # Let the algorithm estimate initial focal length
-        fy=697.0,
-        cx=None,  # Let the algorithm use image center
-        cy=None,
-    )
+    # params_guess = ParamsGuess(
+    #     fx=703.0,  # Let the algorithm estimate initial focal length
+    #     fy=697.0,
+    #     cx=image_size[0] // 2,  # Let the algorithm use image center
+    #     cy=image_size[1] // 2,
+    # )
+    params_guess = ParamsGuess(image_size)
 
     # Create optimizer and run calibration
-    optimizer = Optimizer(init_params, calib_data)
+    optimizer = Optimizer(
+        calib_data, params_guess=params_guess, max_iter=1000, step=0.1, verbose=1
+    )
     calib_results = optimizer.calibrate()
 
     # Format results to match expected output format
