@@ -16,7 +16,7 @@ np.set_printoptions(
 )
 
 
-def rodrigues_to_euler(rvec):
+def rvec_to_euler(rvec):
     """
     Convert Rodrigues rotation vector to Euler angles (roll, pitch, yaw) in degrees.
     """
@@ -643,7 +643,7 @@ class Optimizer:
         # Convert rotation vectors to euler angles for each image
         extrinsics_with_angles = []
         for i in self.indices:
-            euler_angles = rodrigues_to_euler(self.extrinsics[i].rvec)
+            euler_angles = rvec_to_euler(self.extrinsics[i].rvec)
             extrinsics_with_angles.append(
                 {
                     "rvec": self.extrinsics[i].rvec,
@@ -654,7 +654,7 @@ class Optimizer:
 
         extrinsics_with_angles = []
         for i in self.indices:
-            euler_angles = rodrigues_to_euler(self.extrinsics[i].rvec)
+            euler_angles = rvec_to_euler(self.extrinsics[i].rvec)
             extrinsics_with_angles.append(
                 {
                     "rvec": self.extrinsics[i].rvec,
